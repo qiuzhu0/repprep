@@ -50,20 +50,25 @@ function statusFor(fen) {
 }
 
 function useCloudEval(fen) {
-  const [moves, setMoves] = useState(() => getEvals(fen) ?? [])
-  const [status, setStatus] = useState(() => statusFor(fen))
+  const [state, setState] = useState(() => ({
+    moves: getEvals(fen) ?? [],
+    status: statusFor(fen),
+    fen,
+  }))
 
   useEffect(() => {
-    setMoves(getEvals(fen) ?? [])
-    setStatus(statusFor(fen))
+    setState({ moves: getEvals(fen) ?? [], status: statusFor(fen), fen })
     const unsubscribe = evaluate(fen, (evals, complete) => {
-      setMoves(evals)
-      setStatus(complete ? 'done' : 'secondary')
+      setState((prev) =>
+        prev.fen === fen
+          ? { moves: evals, status: complete ? 'done' : 'secondary', fen }
+          : prev,
+      )
     })
     return unsubscribe
   }, [fen])
 
-  return { moves, status }
+  return state
 }
 
 function usePopularMoves(fen, token, rating, speed) {
@@ -142,19 +147,28 @@ function App() {
 
   const fen = chess.fen()
   const lastMove = ply > 0 ? history[ply - 1] : null
-  const { moves: cloudEval, status: evalStatus } = useCloudEval(fen)
+  const { moves: cloudEval, status: evalStatus, fen: evalFen } = useCloudEval(fen)
   const { moves: popularMoves, error: popularError } = usePopularMoves(fen, lichessToken, rating, speed)
   const updateLichessToken = (value) => {
     setLichessToken(value)
     if (value) localStorage.setItem('repprep:lichessToken', value)
     else localStorage.removeItem('repprep:lichessToken')
   }
+  const evalReady = evalFen === fen && evalStatus === 'done'
   const bestEval =
-    cloudEval.length > 0 ? Math.max(...cloudEval.map((m) => m.scoreNum)) : null
+    evalReady && cloudEval.length > 0
+      ? Math.max(...cloudEval.map((m) => m.scoreNum))
+      : null
   const whiteEvalNum =
     bestEval !== null ? (chess.turn() === 'w' ? bestEval : -bestEval) / 100 : null
-  const whiteEval =
-    whiteEvalNum !== null ? `${whiteEvalNum > 0 ? '+' : ''}${whiteEvalNum.toFixed(2)}` : null
+  const evalFraction =
+    whiteEvalNum === null ? null : Math.max(-1, Math.min(1, whiteEvalNum / 3))
+  const whiteShare = evalFraction === null ? 50 : 50 + evalFraction * 50
+  const evalText =
+    whiteEvalNum === null
+      ? null
+      : `${whiteEvalNum > 0 ? '+' : ''}${whiteEvalNum.toFixed(2)}`
+  const evalOnWhite = whiteEvalNum === null || whiteEvalNum >= 0
   const legalMoves = useMemo(
     () => (selectedSquare ? chess.moves({ square: selectedSquare, verbose: true }) : []),
     [chess, selectedSquare],
@@ -328,6 +342,8 @@ function App() {
   const [newRepName, setNewRepName] = useState('')
   const [newRepColor, setNewRepColor] = useState('white')
   const repPopRef = useRef(null)
+  const [tokenPopOpen, setTokenPopOpen] = useState(false)
+  const tokenPopRef = useRef(null)
 
   const submitNewRepertoire = () => {
     const name = newRepName.trim()
@@ -546,7 +562,7 @@ function App() {
   }
 
   useEffect(() => {
-    if (!settingsOpen && !addingRepertoire) return
+    if (!settingsOpen && !addingRepertoire && !tokenPopOpen) return
     const onDown = (e) => {
       if (settingsOpen && settingsRef.current && !settingsRef.current.contains(e.target)) {
         setSettingsOpen(false)
@@ -554,10 +570,13 @@ function App() {
       if (addingRepertoire && repPopRef.current && !repPopRef.current.contains(e.target)) {
         cancelNewRepertoire()
       }
+      if (tokenPopOpen && tokenPopRef.current && !tokenPopRef.current.contains(e.target)) {
+        setTokenPopOpen(false)
+      }
     }
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
-  }, [settingsOpen, addingRepertoire])
+  }, [settingsOpen, addingRepertoire, tokenPopOpen])
 
   return (
     <div className="app">
@@ -793,19 +812,29 @@ function App() {
         </aside>
 
         <div className="middle-col" ref={boardRef}>
-          <Chessboard
-            options={{
-              position: fen,
-              boardOrientation: 'white',
-              animationDurationInMs: 200,
-              allowDragging: !chess.isGameOver(),
-              onPieceDrop,
-              onSquareClick,
-              squareStyles,
-              arrows: boardArrows,
-              onPieceDrag: () => setSelectedSquare(null),
-            }}
-          />
+          <div className="board-wrap">
+            <Chessboard
+              options={{
+                position: fen,
+                boardOrientation: 'white',
+                animationDurationInMs: 200,
+                allowDragging: !chess.isGameOver(),
+                onPieceDrop,
+                onSquareClick,
+                squareStyles,
+                arrows: boardArrows,
+                onPieceDrag: () => setSelectedSquare(null),
+              }}
+            />
+          </div>
+          <div className="game-eval-bar">
+            <div className="eval-white" style={{ height: `${whiteShare}%` }} />
+            {evalText && (
+              <span className={`eval-label ${evalOnWhite ? 'top' : 'bottom'}`}>
+                {evalText}
+              </span>
+            )}
+          </div>
         </div>
 
         <aside className="right-col">
@@ -815,9 +844,6 @@ function App() {
               <span className="bar-segment secondary" />
               <span className="bar-segment done" />
             </div>
-          </div>
-          <div className="cpl-control">
-            <span>eval: {whiteEval ?? '…'}</span>
           </div>
           <div className="moves">
             <button
@@ -845,21 +871,42 @@ function App() {
           </div>
 
           <div className="popular" ref={popularRef} style={{ maxHeight: popularMaxHeight ?? undefined }}>
-            <div className="token-row">
-              <input
-                type="password"
-                value={lichessToken}
-                placeholder="Lichess API token"
-                onChange={(e) => updateLichessToken(e.target.value)}
-              />
-              <a href="https://lichess.org/account/oauth/token" target="_blank" rel="noreferrer">
-                Get a free token
+            <div className="token-add" ref={tokenPopRef}>
+              <a
+                href="#"
+                className="token-link"
+                onClick={(e) => {
+                  e.preventDefault()
+                  setTokenPopOpen((o) => !o)
+                }}
+              >
+                {lichessToken ? 'Change token' : 'Enter token'}
               </a>
+              {tokenPopOpen && (
+                <div className="token-pop">
+                  <input
+                    type="password"
+                    value={lichessToken}
+                    placeholder="Lichess API token"
+                    autoFocus
+                    onChange={(e) => updateLichessToken(e.target.value)}
+                  />
+                  <p className="hint">
+                    <a
+                      href="https://lichess.org/account/oauth/token"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Get a free token
+                    </a>
+                  </p>
+                </div>
+              )}
             </div>
             {popularError ? (
               <p className="empty error">{popularError}</p>
             ) : popularMoves === undefined ? (
-              <p className="empty">Enter your token above to load player DB stats.</p>
+              <p className="empty">Enter your token to load player DB stats.</p>
             ) : popularMoves === null ? (
               <p className="empty">Loading…</p>
             ) : popularMoves.length === 0 ? (
