@@ -313,24 +313,46 @@ function App() {
     setTimeout(() => setCopied(false), 1500)
   }
 
-  const exportBreadcrumbs = () => {
-    const blob = new Blob([JSON.stringify(breadcrumbs, null, 2)], {
+  const exportRepertoires = () => {
+    const blob = new Blob([JSON.stringify(repertoires, null, 2)], {
       type: 'application/json',
     })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = 'breadcrumbs.json'
+    a.download = 'repertoires.json'
     a.click()
     URL.revokeObjectURL(url)
   }
 
   const importRef = useRef(null)
-  const importBreadcrumbs = (file) => {
+  const importRepertoires = (file) => {
     const reader = new FileReader()
     reader.onload = () => {
       try {
-        replaceBreadcrumbs(JSON.parse(reader.result))
+        const data = JSON.parse(reader.result)
+        if (
+          Array.isArray(data) &&
+          data.every(
+            (r) =>
+              r &&
+              typeof r === 'object' &&
+              typeof r.id === 'string' &&
+              typeof r.name === 'string' &&
+              Array.isArray(r.breadcrumbs),
+          )
+        ) {
+          const reps = data.map((r) => ({
+            color: r.color === 'black' ? 'black' : 'white',
+            ...r,
+          }))
+          setRepertoires(reps)
+          setActiveRepertoireId((cur) =>
+            reps.some((r) => r.id === cur) ? cur : reps[0].id,
+          )
+        } else if (Array.isArray(data)) {
+          replaceBreadcrumbs(data)
+        }
       } catch {
         /* invalid JSON, ignore */
       }
@@ -348,7 +370,7 @@ function App() {
   const submitNewRepertoire = () => {
     const name = newRepName.trim()
     if (!name) return
-    const id = `rep-${Date.now()}`
+    const id = `rep-${Date.now()}-${newRepColor}`
     setRepertoires((reps) => [...reps, { id, name, color: newRepColor, breadcrumbs: [] }])
     setActiveRepertoireId(id)
     setAddingRepertoire(false)
@@ -367,7 +389,9 @@ function App() {
     setExcavation({ status: 'loading' })
     try {
       const outcome = await excavate(fen, lichessToken, activeRepertoire?.color ?? 'none', rating, speed, excavateCount, breadcrumbs)
-      if (excavationRef.current === id) setExcavation({ status: 'done', ...outcome })
+      if (excavationRef.current === id) {
+        setExcavation({ status: 'done', rootFen: fen, ...outcome })
+      }
     } catch (err) {
       if (excavationRef.current === id) {
         setExcavation({
@@ -379,39 +403,58 @@ function App() {
   }
 
   const gotoExcavated = (entry) => {
-    const probe = new Chess()
-    let rootPly = -1
-    for (let i = 0; i < history.length; i++) {
-      if (probe.fen() === entry.rootFen) {
-        rootPly = i
-        break
+    try {
+      const probe = new Chess()
+      let rootPly = -1
+      for (let i = 0; i < history.length; i++) {
+        if (probe.fen() === entry.rootFen) {
+          rootPly = i
+          break
+        }
+        try {
+          probe.move(history[i].san)
+        } catch {
+          break
+        }
       }
-      try {
-        probe.move(history[i].san)
-      } catch {
-        break
+      if (rootPly === -1) return
+      const game = new Chess(entry.rootFen)
+      const moves = []
+      for (const uci of entry.ucis) {
+        try {
+          moves.push(game.move(uciToMove(uci)))
+        } catch {
+          return
+        }
       }
+      setHistory((prev) => [...prev.slice(0, rootPly), ...moves])
+      setPly(rootPly + moves.length)
+      setSelectedSquare(null)
+      setPendingPromotion(null)
+    } catch (err) {
+      console.error('gotoExcavated failed:', err)
     }
-    if (rootPly === -1) return
-    const game = new Chess(entry.rootFen)
-    const moves = []
-    for (const uci of entry.ucis) {
-      try {
-        moves.push(game.move(uciToMove(uci)))
-      } catch {
-        return
-      }
-    }
-    setHistory((prev) => [...prev.slice(0, rootPly), ...moves])
-    setPly(rootPly + moves.length)
-    setSelectedSquare(null)
-    setPendingPromotion(null)
   }
 
   const visibleExcavationResults =
     excavation?.status === 'done'
       ? excavation.results.filter((r) => !breadcrumbs.includes(r.fen))
       : null
+
+  const excavationLive =
+    excavation?.status === 'done' &&
+    (() => {
+      const probe = new Chess()
+      for (let i = 0; i < history.length; i++) {
+        if (probe.fen() === excavation.rootFen) return true
+        try {
+          probe.move(history[i].san)
+        } catch {
+          return false
+        }
+      }
+      return false
+    })()
 
   const measure = useCallback(() => {
     const board = boardRef.current
@@ -593,7 +636,7 @@ function App() {
             style={{ display: 'none' }}
             onChange={(e) => {
               const file = e.target.files?.[0]
-              if (file) importBreadcrumbs(file)
+              if (file) importRepertoires(file)
               e.target.value = ''
             }}
           />
@@ -686,7 +729,7 @@ function App() {
                 </div>
               )}
             </div>
-            <button type="button" className="copy" onClick={exportBreadcrumbs}>
+            <button type="button" className="copy" onClick={exportRepertoires}>
               Export
             </button>
             <button type="button" className="copy" onClick={() => importRef.current?.click()}>
@@ -794,6 +837,10 @@ function App() {
                       )
                     ) : visibleExcavationResults.length === 0 ? (
                       <p className="empty">All excavated positions are breadcrumbed.</p>
+                    ) : !excavationLive ? (
+                      <p className="empty">
+                        Excavation is from a different position — re-run Excavate.
+                      </p>
                     ) : (
                       <ol className="excavate-list">
                         {visibleExcavationResults.map((r, i) => (

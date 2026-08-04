@@ -24,8 +24,8 @@ function clearLegacyCookie() {
 
 export function defaultRepertoires() {
   return [
-    { id: 'white-rep', name: 'White rep', color: 'white', breadcrumbs: [] },
-    { id: 'black-rep', name: 'Black rep', color: 'black', breadcrumbs: [] },
+    { id: 'main-white', name: 'main', color: 'white', breadcrumbs: [] },
+    { id: 'main-black', name: 'main', color: 'black', breadcrumbs: [] },
   ]
 }
 
@@ -44,7 +44,13 @@ export function loadRepertoires() {
             Array.isArray(r.breadcrumbs),
         )
       ) {
-        return parsed.map((r) => ({ color: 'white', ...r }))
+        return parsed.map((r) => {
+          if (typeof r.color === 'string') return r
+          return {
+            ...r,
+            color: r.id === 'black-rep' || /black/i.test(r.name) ? 'black' : 'white',
+          }
+        })
       }
     }
   } catch {
