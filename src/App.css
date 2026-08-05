@@ -191,6 +191,12 @@
   gap: 8px;
 }
 
+.mark-hint {
+  margin: 0;
+  font-size: 11px;
+  color: #7a8194;
+}
+
 .repertoire-row {
   display: flex;
   gap: 8px;

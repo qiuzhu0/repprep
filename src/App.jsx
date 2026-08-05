@@ -560,6 +560,27 @@ function App() {
     applyMove(move)
   }, [cloudEval, breadcrumbedLans, applyMove])
 
+  const toggleBreadcrumb = useCallback(() => {
+    if (breadcrumbs.includes(fen)) {
+      const descendants = []
+      const game = new Chess()
+      for (let i = 0; i < history.length; i++) {
+        game.move(history[i].san)
+        if (i >= ply) descendants.push(game.fen())
+      }
+      updateBreadcrumbs((b) => b.filter((f) => f !== fen && !descendants.includes(f)))
+    } else {
+      const line = []
+      const game = new Chess()
+      for (let i = 0; i < ply; i++) {
+        game.move(history[i].san)
+        line.push(game.fen())
+      }
+      line.push(fen)
+      updateBreadcrumbs((b) => [...b, ...line.filter((f) => !b.includes(f))])
+    }
+  }, [fen, ply, history, breadcrumbs, updateBreadcrumbs])
+
   useEffect(() => {
     const onKey = (event) => {
       if (event.key === 'ArrowLeft') {
@@ -589,24 +610,7 @@ function App() {
         setHistory((prev) => prev.slice(0, ply))
       } else if (event.key === ' ') {
         event.preventDefault()
-        if (breadcrumbs.includes(fen)) {
-          const descendants = []
-          const game = new Chess()
-          for (let i = 0; i < history.length; i++) {
-            game.move(history[i].san)
-            if (i >= ply) descendants.push(game.fen())
-          }
-          updateBreadcrumbs((b) => b.filter((f) => f !== fen && !descendants.includes(f)))
-        } else {
-          const line = []
-          const game = new Chess()
-          for (let i = 0; i < ply; i++) {
-            game.move(history[i].san)
-            line.push(game.fen())
-          }
-          line.push(fen)
-          updateBreadcrumbs((b) => [...b, ...line.filter((f) => !b.includes(f))])
-        }
+        toggleBreadcrumb()
       } else {
         return
       }
@@ -615,7 +619,7 @@ function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [history.length, history, ply, playBestMove, fen, breadcrumbs, updateBreadcrumbs])
+  }, [history.length, history, ply, playBestMove, fen, toggleBreadcrumb])
 
   const onPieceDrop = ({ sourceSquare, targetSquare }) => {
     if (!targetSquare) return false
@@ -788,6 +792,7 @@ function App() {
               Import
             </button>
           </div>
+            <p className="mark-hint">[space] to mark positions</p>
             <div className="repertoire-row">
               <select
                 className="repertoire-select"
