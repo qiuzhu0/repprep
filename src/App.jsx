@@ -173,6 +173,7 @@ function App() {
   const [repertoires, setRepertoires] = useState(loadRepertoires)
   const [activeRepertoireId, setActiveRepertoireId] = useState(() => {
     const id = loadActiveRepertoireId()
+    if (repertoires.length === 0) return null
     return repertoires.some((r) => r.id === id) ? id : repertoires[0].id
   })
   const [lichessToken, setLichessToken] = useState(
@@ -401,7 +402,7 @@ function App() {
           }))
           setRepertoires(reps)
           setActiveRepertoireId((cur) =>
-            reps.some((r) => r.id === cur) ? cur : reps[0].id,
+            reps.length === 0 ? null : reps.some((r) => r.id === cur) ? cur : reps[0].id,
           )
         } else if (Array.isArray(data)) {
           replaceBreadcrumbs(data)
@@ -435,6 +436,16 @@ function App() {
     setAddingRepertoire(false)
     setNewRepName('')
     setNewRepColor('white')
+  }
+
+  const deleteRepertoire = (id) => {
+    setRepertoires((reps) => {
+      const next = reps.filter((r) => r.id !== id)
+      setActiveRepertoireId((cur) =>
+        next.length === 0 ? null : next.some((r) => r.id === cur) ? cur : next[0].id,
+      )
+      return next
+    })
   }
 
   const runExcavation = async () => {
@@ -791,6 +802,18 @@ function App() {
                 ))}
               </select>
               <div className="repertoire-add" ref={repPopRef}>
+                <button
+                  type="button"
+                  className="copy add-rep"
+                  onClick={() =>
+                    confirm(`Delete ${activeRepertoire?.breadcrumbs?.length ?? 0} positions?`) &&
+                    deleteRepertoire(activeRepertoireId)
+                  }
+                  disabled={repertoires.length <= 1}
+                  title={repertoires.length <= 1 ? 'Cannot delete the last repertoire' : 'Delete repertoire'}
+                >
+                  ×
+                </button>
                 <button
                   type="button"
                   className="copy add-rep"
