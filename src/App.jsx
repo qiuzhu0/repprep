@@ -24,6 +24,49 @@ const PROMOTION_PIECES = [
   { key: 'n', name: 'Knight' },
 ]
 
+const SETTINGS_COOKIE = 'repprep:settings'
+
+const RATING_OPTIONS = [
+  { value: '1000', label: '1000–1200' },
+  { value: '1200', label: '1200–1400' },
+  { value: '1400', label: '1400–1600' },
+  { value: '1600', label: '1600–1800' },
+  { value: '1800', label: '1800–2000' },
+  { value: '2000', label: '2000–2200' },
+  { value: '2200', label: '2200–2500' },
+  { value: '2500', label: '2500+' },
+]
+
+const SPEED_OPTIONS = [
+  { value: 'ultraBullet', label: 'UltraBullet' },
+  { value: 'bullet', label: 'Bullet' },
+  { value: 'blitz', label: 'Blitz' },
+  { value: 'rapid', label: 'Rapid' },
+  { value: 'classical', label: 'Classical' },
+  { value: 'correspondence', label: 'Correspondence' },
+]
+
+function readSettings() {
+  const match = document.cookie
+    .split(';')
+    .map((s) => s.trim())
+    .find((s) => s.startsWith(`${SETTINGS_COOKIE}=`))
+  if (!match) return {}
+  try {
+    return JSON.parse(decodeURIComponent(match.slice(SETTINGS_COOKIE.length + 1))) ?? {}
+  } catch {
+    return {}
+  }
+}
+
+function writeSettings(settings) {
+  document.cookie = `${SETTINGS_COOKIE}=${encodeURIComponent(JSON.stringify(settings))}; path=/; max-age=31536000; SameSite=Lax`
+}
+
+function toggleOption(list, setList, value) {
+  setList(list.includes(value) ? list.filter((v) => v !== value) : [...list, value])
+}
+
 function formatPgn(sans) {
   const lines = []
   for (let i = 0; i < sans.length; i += 2) {
@@ -85,8 +128,8 @@ function usePopularMoves(fen, token, rating, speed) {
     setMoves(null)
     setError(null)
     const params = new URLSearchParams({ fen, moves: '12', topGames: '0', recentGames: '0' })
-    if (rating) params.set('ratings', rating)
-    if (speed) params.set('speeds', speed)
+    if (rating.length) params.set('ratings', rating.join(','))
+    if (speed.length) params.set('speeds', speed.join(','))
     fetch(`https://explorer.lichess.ovh/lichess?${params}`, {
       headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]),
@@ -116,11 +159,17 @@ function App() {
   const [selectedSquare, setSelectedSquare] = useState(null)
   const [pendingPromotion, setPendingPromotion] = useState(null)
   const [copied, setCopied] = useState(false)
-  const [cpl, setCpl] = useState(50)
-  const [arrowLimit, setArrowLimit] = useState(5)
-  const [rating, setRating] = useState('')
-  const [speed, setSpeed] = useState('')
-  const [excavateCount, setExcavateCount] = useState(5)
+  const [cpl, setCpl] = useState(() => readSettings().cpl ?? 50)
+  const [arrowLimit, setArrowLimit] = useState(() => readSettings().arrowLimit ?? 5)
+  const [rating, setRating] = useState(() => {
+    const r = readSettings().rating
+    return Array.isArray(r) ? r.filter((v) => RATING_OPTIONS.some((o) => o.value === v)) : []
+  })
+  const [speed, setSpeed] = useState(() => {
+    const s = readSettings().speed
+    return Array.isArray(s) ? s.filter((v) => SPEED_OPTIONS.some((o) => o.value === v)) : []
+  })
+  const [excavateCount, setExcavateCount] = useState(() => readSettings().excavateCount ?? 5)
   const [repertoires, setRepertoires] = useState(loadRepertoires)
   const [activeRepertoireId, setActiveRepertoireId] = useState(() => {
     const id = loadActiveRepertoireId()
@@ -138,6 +187,10 @@ function App() {
   const [excavateMaxHeight, setExcavateMaxHeight] = useState(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const settingsRef = useRef(null)
+
+  useEffect(() => {
+    writeSettings({ cpl, arrowLimit, rating, speed, excavateCount })
+  }, [cpl, arrowLimit, rating, speed, excavateCount])
 
   const chess = useMemo(() => {
     const game = new Chess()
@@ -390,7 +443,12 @@ function App() {
     try {
       const outcome = await excavate(fen, lichessToken, activeRepertoire?.color ?? 'none', rating, speed, excavateCount, breadcrumbs)
       if (excavationRef.current === id) {
-        setExcavation({ status: 'done', rootFen: fen, ...outcome })
+        setExcavation({
+          status: 'done',
+          rootFen: fen,
+          rootSans: history.slice(0, ply).map((m) => m.san),
+          ...outcome,
+        })
       }
     } catch (err) {
       if (excavationRef.current === id) {
@@ -404,21 +462,16 @@ function App() {
 
   const gotoExcavated = (entry) => {
     try {
+      const base = []
       const probe = new Chess()
-      let rootPly = -1
-      for (let i = 0; i < history.length; i++) {
-        if (probe.fen() === entry.rootFen) {
-          rootPly = i
-          break
-        }
+      for (const san of excavation?.rootSans ?? []) {
         try {
-          probe.move(history[i].san)
+          base.push(probe.move(san))
         } catch {
-          break
+          return
         }
       }
-      if (rootPly === -1) return
-      const game = new Chess(entry.rootFen)
+      const game = probe
       const moves = []
       for (const uci of entry.ucis) {
         try {
@@ -427,8 +480,8 @@ function App() {
           return
         }
       }
-      setHistory((prev) => [...prev.slice(0, rootPly), ...moves])
-      setPly(rootPly + moves.length)
+      setHistory([...base, ...moves])
+      setPly(base.length + moves.length)
       setSelectedSquare(null)
       setPendingPromotion(null)
     } catch (err) {
@@ -440,21 +493,6 @@ function App() {
     excavation?.status === 'done'
       ? excavation.results.filter((r) => !breadcrumbs.includes(r.fen))
       : null
-
-  const excavationLive =
-    excavation?.status === 'done' &&
-    (() => {
-      const probe = new Chess()
-      for (let i = 0; i < history.length; i++) {
-        if (probe.fen() === excavation.rootFen) return true
-        try {
-          probe.move(history[i].san)
-        } catch {
-          return false
-        }
-      }
-      return false
-    })()
 
   const measure = useCallback(() => {
     const board = boardRef.current
@@ -687,33 +725,36 @@ function App() {
                       }
                     />
                   </label>
-                  <label>
-                    Rating
-                    <select value={rating} onChange={(e) => setRating(e.target.value)}>
-                      <option value="">Any</option>
-                      <option value="1000">≤ 1000</option>
-                      <option value="1200">1000–1200</option>
-                      <option value="1400">1200–1400</option>
-                      <option value="1600">1400–1600</option>
-                      <option value="1800">1600–1800</option>
-                      <option value="2000">1800–2000</option>
-                      <option value="2200">2000–2200</option>
-                      <option value="2500">2200–2500</option>
-                      <option value="9999">2500+</option>
-                    </select>
-                  </label>
-                  <label>
+                  <div className="settings-field">
+                    Ratings
+                    <div className="check-grid">
+                      {RATING_OPTIONS.map((o) => (
+                        <label key={o.value} className="check-option">
+                          <input
+                            type="checkbox"
+                            checked={rating.includes(o.value)}
+                            onChange={() => toggleOption(rating, setRating, o.value)}
+                          />
+                          <span>{o.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="settings-field">
                     Time control
-                    <select value={speed} onChange={(e) => setSpeed(e.target.value)}>
-                      <option value="">Any</option>
-                      <option value="ultraBullet">UltraBullet</option>
-                      <option value="bullet">Bullet</option>
-                      <option value="blitz">Blitz</option>
-                      <option value="rapid">Rapid</option>
-                      <option value="classical">Classical</option>
-                      <option value="correspondence">Correspondence</option>
-                    </select>
-                  </label>
+                    <div className="check-grid">
+                      {SPEED_OPTIONS.map((o) => (
+                        <label key={o.value} className="check-option">
+                          <input
+                            type="checkbox"
+                            checked={speed.includes(o.value)}
+                            onChange={() => toggleOption(speed, setSpeed, o.value)}
+                          />
+                          <span>{o.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
                   <label>
                     Excavated positions
                     <input
@@ -828,19 +869,13 @@ function App() {
                       <p className="empty error">Hit Lichess rate limit. Try again in 1 min.</p>
                     )}
                     {excavation.results.length === 0 ? (
-                      excavation.noRootLine ? (
-                        <p className="empty">
-                          The breadcrumb player has no breadcrumbed moves from the current position.
-                        </p>
+                      excavation.fetchError ? (
+                        <p className="empty error">Excavation failed: {excavation.fetchError}.</p>
                       ) : (
                         <p className="empty">No unbreadcrumbed positions found.</p>
                       )
                     ) : visibleExcavationResults.length === 0 ? (
                       <p className="empty">All excavated positions are breadcrumbed.</p>
-                    ) : !excavationLive ? (
-                      <p className="empty">
-                        Excavation is from a different position — re-run Excavate.
-                      </p>
                     ) : (
                       <ol className="excavate-list">
                         {visibleExcavationResults.map((r, i) => (

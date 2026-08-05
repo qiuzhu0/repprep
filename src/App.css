@@ -59,8 +59,19 @@
   color: #1f2430;
 }
 
-.settings-pop label + label {
+.settings-pop label + label,
+.settings-pop label + .settings-field,
+.settings-pop .settings-field + label {
   margin-top: 12px;
+}
+
+.settings-pop .settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2430;
 }
 
 .settings-pop input {
@@ -72,13 +83,30 @@
   color: #1f2430;
 }
 
-.settings-pop select {
-  padding: 6px 8px;
-  font-size: 14px;
-  border: 1px solid #d4d7de;
-  border-radius: 6px;
-  background: #fff;
+.settings-pop .check-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(62px, 1fr));
+  gap: 6px 8px;
+}
+
+.settings-pop .check-option {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
   color: #1f2430;
+  line-height: 1.15;
+  cursor: pointer;
+}
+
+.settings-pop .check-option input {
+  width: auto;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  accent-color: #3b8f52;
 }
 
 .settings-pop .hint {
@@ -621,7 +649,8 @@
     border-color: #2c3038;
   }
 
-  .settings-pop label {
+  .settings-pop label,
+  .settings-pop .settings-field {
     color: #e6e8ee;
   }
 
@@ -631,10 +660,12 @@
     color: #e6e8ee;
   }
 
-  .settings-pop select {
-    background: #24272e;
-    border-color: #34383f;
+  .settings-pop .check-option {
     color: #e6e8ee;
+  }
+
+  .settings-pop .check-option input {
+    background: none;
   }
 
   .settings-pop .hint {
