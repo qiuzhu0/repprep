@@ -179,6 +179,7 @@ export async function excavate(fen, token, restrict, rating = '', speed = '', co
     const turn = node.fen.split(' ')[1]
     const isRepertoireTurn = repertoire !== null && turn === repertoire
 
+    const children = []
     for (const m of data.moves) {
       const share = (m.white || 0) + (m.draws || 0) + (m.black || 0)
       if (share <= 0) continue
@@ -188,16 +189,30 @@ export async function excavate(fen, token, restrict, rating = '', speed = '', co
       } catch {
         continue
       }
-      const isCrumb = crumbsSet.has(child.fen)
+      children.push({ m, share, child, isCrumb: crumbsSet.has(child.fen) })
+    }
 
-      // The repertoire color only ever plays breadcrumb moves; skip anything
-      // else it could legally play. The opponent may play any move, so every
-      // one of their replies is explored and recorded.
-      if (isRepertoireTurn && !isCrumb) continue
+    // Decide which moves to follow. The repertoire color only ever plays
+    // breadcrumb moves, so where it has a breadcrumbed reply those are
+    // followed with full probability. Where it has none (a breadcrumbed leaf
+    // or a freshly excavated position) its single most popular reply is
+    // projected so the search keeps reaching deeper, more popular positions
+    // instead of stopping one move beyond the breadcrumbed tree. The opponent
+    // may play any move, so every one of their replies is explored/recorded.
+    let toExpand
+    if (isRepertoireTurn) {
+      const crumbed = children.filter((c) => c.isCrumb)
+      if (crumbed.length > 0) {
+        toExpand = crumbed.map((c) => ({ ...c, prob: node.prob }))
+      } else {
+        const top = children.reduce((best, c) => (c.share > best.share ? c : best), children[0])
+        toExpand = top ? [{ ...top, prob: node.prob }] : []
+      }
+    } else {
+      toExpand = children.map((c) => ({ ...c, prob: node.prob * (c.share / data.total) }))
+    }
 
-      // A forced breadcrumb reply is reached with certainty, so it keeps the
-      // full probability; an opponent reply is weighted by its popularity.
-      const childProb = isCrumb && isRepertoireTurn ? node.prob : node.prob * (share / data.total)
+    for (const { child, m, prob: childProb, isCrumb } of toExpand) {
       if (childProb < MIN_PROB) continue
 
       const entry = {
@@ -210,7 +225,9 @@ export async function excavate(fen, token, restrict, rating = '', speed = '', co
         sans: [...node.sans, child.move.san],
       }
 
-      if (!isCrumb) {
+      // Only positions the repertoire color must answer (opponent replies)
+      // are candidates; projected own moves are pass-throughs.
+      if (!isCrumb && !isRepertoireTurn) {
         const prev = results.get(child.fen)
         if (!prev || entry.prob > prev.prob) results.set(child.fen, entry)
       }
